@@ -38,7 +38,7 @@ int executingProcessID=NOPROCESS;
 int sipID;
 
 // Initial PID for assignation
-int initialPID=0;
+int initialPID=PROCESSTABLEMAXSIZE-1;
 
 // Begin indes for daemons in programList
 int baseDaemonsInProgramList; 
@@ -81,6 +81,7 @@ void OperatingSystem_Initialize(int daemonsIndex) {
 	// Create all user processes from the information given in the command line
 	OperatingSystem_LongTermScheduler();
 	
+
 	if (strcmp(programList[processTable[sipID].programListIndex]->executableName,"SystemIdleProcess")) {
 		// Show red message "FATAL ERROR: Missing SIP program!\n"
 		ComputerSystem_DebugMessage(99,SHUTDOWN,"FATAL ERROR: Missing SIP program!\n");
@@ -135,7 +136,7 @@ int OperatingSystem_LongTermScheduler() {
 				ComputerSystem_DebugMessage(104, ERROR,programList[i]->executableName,"-invalid priority or size-"); //CHANGE EX5
 			}
 			if(PID == TOOBIGPROCESS){
-				ComputerSystem_DebugMessage(105, ERROR,programList[i]->executableName); //CHANGE EX5
+				ComputerSystem_DebugMessage(105, ERROR,programList[i]->executableName); //CHANGE EX6
 			}			
 		}
 		else{
@@ -184,21 +185,21 @@ int OperatingSystem_CreateProcess(int indexOfExecutableProgram) {
 	if(processSize < 0 || priority < 0){
 		return PROGRAMNOTVALID; //CHANGE EX5
 	}
-
-	if(processSize > 50){
-		return TOOBIGPROCESS; //CHANGE EX6
-	}
 	
 	// Obtain enough memory space
  	loadingPhysicalAddress=OperatingSystem_ObtainMainMemory(processSize, PID);
 
 	if(loadingPhysicalAddress < 0){
-		return TOOBIGPROCESS; //CHANGE EX7
+		return TOOBIGPROCESS; //CHANGE EX6
 	}
 
 	// Load program in the allocated memory
-	OperatingSystem_LoadProgram(programFile, loadingPhysicalAddress, processSize);
+	int address = OperatingSystem_LoadProgram(programFile, loadingPhysicalAddress, processSize);
 	
+	if(address < 0){
+		return TOOBIGPROCESS; //CHANGE EX7
+	}
+
 	// PCB initialization
 	OperatingSystem_PCBInitialization(PID, loadingPhysicalAddress, processSize, priority, indexOfExecutableProgram);
 	
@@ -250,6 +251,7 @@ void OperatingSystem_MoveToTheREADYState(int PID) {
 	if (Heap_add(PID, readyToRunQueue,QUEUE_PRIORITY ,&numberOfReadyToRunProcesses ,PROCESSTABLEMAXSIZE)>=0) {
 		processTable[PID].state=READY;
 	} 
+	OperatingSystem_PrintReadyToRunQueue();
 }
 
 
@@ -397,6 +399,27 @@ void OperatingSystem_InterruptLogic(int entryPoint){
 			OperatingSystem_HandleException();
 			break;
 	}
-
 }
+
+void OperatingSystem_PrintReadyToRunQueue(){
+	int i;
+	ComputerSystem_DebugMessage(106,SHORTTERMSCHEDULE);
+	for(i = 0 ; i<numberOfReadyToRunProcesses ; i++){
+		if(i == numberOfReadyToRunProcesses-1){
+			if(i == 0){
+				ComputerSystem_DebugMessage(107,SHORTTERMSCHEDULE,readyToRunQueue[i].info, processTable[readyToRunQueue[i].info].priority, "\n");
+			} else {
+				ComputerSystem_DebugMessage(108,SHORTTERMSCHEDULE,readyToRunQueue[i].info, processTable[readyToRunQueue[i].info].priority, "\n");
+			}
+		}				
+		else{
+			if(i == 0){
+				ComputerSystem_DebugMessage(107,SHORTTERMSCHEDULE,readyToRunQueue[i].info, processTable[readyToRunQueue[i].info].priority, ",");
+			} else {
+				ComputerSystem_DebugMessage(108,SHORTTERMSCHEDULE,readyToRunQueue[i].info, processTable[readyToRunQueue[i].info].priority, ",");
+			}
+		}
+	}
+}
+
 

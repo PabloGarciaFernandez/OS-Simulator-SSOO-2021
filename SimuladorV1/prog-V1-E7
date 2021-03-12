@@ -1,4 +1,4 @@
-// prog-V1-E7
+//prog-V1-E7
 19
 2
 READ 20
@@ -10,3 +10,4 @@ TRAP 3
 NOP
 JUMP -1
 TRAP 3
+HALT

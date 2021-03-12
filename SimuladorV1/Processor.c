@@ -162,6 +162,20 @@ void Processor_DecodeAndExecuteInstruction() {
 			registerPC_CPU++;
 			break;
 
+		// Instruction SHIFT (SAL and SAR)
+		case SHIFT_INST:
+			if (operand1 < 0)
+			{																					// SAL do not allow more than 31 bists shift...
+				if (registerAccumulator_CPU & (-1 << (sizeof(int) * 8 - ((-operand1) & 0x1f)))) // some bit overflow...
+					Processor_ActivatePSW_Bit(OVERFLOW_BIT);
+				registerAccumulator_CPU <<= ((-operand1) & 0x1f); // unnecesary & because Intel make this way...
+			}
+			else											 // SAR do not allow more than 31 bists shift...
+				registerAccumulator_CPU >>= operand1 & 0x1f; // unnecesary & because Intel make this way...
+
+			registerPC_CPU++;
+			break;
+
 		// Instruction READ
 		case READ_INST: 
 			registerMAR_CPU=operand1;

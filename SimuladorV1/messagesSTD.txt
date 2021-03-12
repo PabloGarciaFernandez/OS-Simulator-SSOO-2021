@@ -8,4 +8,8 @@
 103 ,@RERROR: There are not free entries in the process table for the program [%s]@@ \n
 104 ,@RERROR: Program [%s] is not valid [--%s--]@@ \n
 105 ,@RERROR: Program [%s] is too big \n
+106 ,Ready-to-run process queue:\n
+107 ,\t[@G%d@@,%d]%s
+108 , [@G%d@@,%d]%s
+
 
