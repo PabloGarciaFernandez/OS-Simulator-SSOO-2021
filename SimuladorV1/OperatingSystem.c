@@ -50,6 +50,9 @@ int numberOfReadyToRunProcesses=0;
 // Variable containing the number of not terminated user processes
 int numberOfNotTerminatedUserProcesses=0;
 
+//EX10
+char * statesNames[5]={"NEW","READY","EXECUTING","BLOCKED","EXIT"};
+
 // Initial set of tasks of the OS
 void OperatingSystem_Initialize(int daemonsIndex) {
 	
@@ -229,6 +232,7 @@ void OperatingSystem_PCBInitialization(int PID, int initialPhysicalAddress, int 
 	processTable[PID].initialPhysicalAddress=initialPhysicalAddress;
 	processTable[PID].processSize=processSize;
 	processTable[PID].state=NEW;
+	ComputerSystem_DebugMessage(111,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[0]);
 	processTable[PID].priority=priority;
 	processTable[PID].programListIndex=processPLIndex;
 	// Daemons run in protected mode and MMU use real address
@@ -250,6 +254,7 @@ void OperatingSystem_MoveToTheREADYState(int PID) {
 	
 	if (Heap_add(PID, readyToRunQueue,QUEUE_PRIORITY ,&numberOfReadyToRunProcesses ,PROCESSTABLEMAXSIZE)>=0) {
 		processTable[PID].state=READY;
+		ComputerSystem_DebugMessage(110,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[0],statesNames[1]);
 	} 
 	OperatingSystem_PrintReadyToRunQueue();
 }
@@ -287,6 +292,7 @@ void OperatingSystem_Dispatch(int PID) {
 	executingProcessID=PID;
 	// Change the process' state
 	processTable[PID].state=EXECUTING;
+	ComputerSystem_DebugMessage(110,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[1],statesNames[2]);
 	// Modify hardware registers with appropriate values for the process identified by PID
 	OperatingSystem_RestoreContext(PID);
 }
@@ -362,6 +368,7 @@ void OperatingSystem_TerminateProcess() {
 	}
 	// Select the next process to execute (sipID if no more user processes)
 	selectedProcess=OperatingSystem_ShortTermScheduler();
+	ComputerSystem_DebugMessage(110,SYSPROC,selectedProcess,programList[processTable[selectedProcess].programListIndex]->executableName,statesNames[2],statesNames[4]);
 
 	// Assign the processor to that process
 	OperatingSystem_Dispatch(selectedProcess);
@@ -401,7 +408,7 @@ void OperatingSystem_InterruptLogic(int entryPoint){
 	}
 }
 
-void OperatingSystem_PrintReadyToRunQueue(){
+void OperatingSystem_PrintReadyToRunQueue(){ //EX9
 	int i;
 	ComputerSystem_DebugMessage(106,SHORTTERMSCHEDULE);
 	for(i = 0 ; i<numberOfReadyToRunProcesses ; i++){
