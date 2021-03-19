@@ -258,8 +258,8 @@ void OperatingSystem_PCBInitialization(int PID, int initialPhysicalAddress, int 
 void OperatingSystem_MoveToTheREADYState(int PID) {
 	
 	if (Heap_add(PID, readyToRunQueue[processTable[PID].queueID],QUEUE_PRIORITY ,&numberOfReadyToRunProcesses[processTable[PID].queueID] ,PROCESSTABLEMAXSIZE)>=0) {
+		ComputerSystem_DebugMessage(110,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[processTable[PID].state],statesNames[1]);
 		processTable[PID].state=READY;
-		ComputerSystem_DebugMessage(110,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[0],statesNames[1]);
 	} 
 	OperatingSystem_PrintReadyToRunQueue();
 }
@@ -298,9 +298,9 @@ void OperatingSystem_Dispatch(int PID) {
 
 	// The process identified by PID becomes the current executing process
 	executingProcessID=PID;
+	ComputerSystem_DebugMessage(110,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[processTable[PID].state],statesNames[2]);
 	// Change the process' state
 	processTable[PID].state=EXECUTING;
-	ComputerSystem_DebugMessage(110,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[1],statesNames[2]);
 	// Modify hardware registers with appropriate values for the process identified by PID
 	OperatingSystem_RestoreContext(PID);
 }
@@ -358,8 +358,9 @@ void OperatingSystem_TerminateProcess() {
   
 	int selectedProcess;
   	
+	ComputerSystem_DebugMessage(110,SYSPROC,executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName,
+		statesNames[processTable[executingProcessID].state],statesNames[4]);
 	processTable[executingProcessID].state=EXIT;
-	ComputerSystem_DebugMessage(110,SYSPROC,executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName,statesNames[2],statesNames[4]);
 	
 	if (programList[processTable[executingProcessID].programListIndex]->type==USERPROGRAM) 
 		// One more user process that has terminated
@@ -401,6 +402,18 @@ void OperatingSystem_HandleSystemCall() {
 			ComputerSystem_DebugMessage(73,SYSPROC,executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName);
 			OperatingSystem_TerminateProcess();
 			break;
+		case SYSCALL_YIELD:
+			
+			if(numberOfReadyToRunProcesses[processTable[executingProcessID].queueID] > 0){
+				int processQueueID = processTable[executingProcessID].queueID;
+				int newPID = Heap_getFirst(readyToRunQueue[processQueueID] , numberOfReadyToRunProcesses[processQueueID]); //EX12 Obtains the first element of the priority process.
+
+				ComputerSystem_DebugMessage(115,SHORTTERMSCHEDULE,executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName,
+				newPID,programList[processTable[newPID].programListIndex]->executableName);
+				OperatingSystem_PreemptRunningProcess();
+				OperatingSystem_Dispatch(newPID);						
+			}
+			break;		
 	}
 }
 	
