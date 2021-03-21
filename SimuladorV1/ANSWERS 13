@@ -1,0 +1,4 @@
+A) It is necessary because you need them to know in which instruction of the process you were when you sleep it
+B) It is necessary to save the accumulator
+c) Yes, it would be necessary because without the accumulator whenever the process is retaken it would start again instead of continuing in the last instrucction executed.
+D) Yes it would affect to the execution and the changes should be made in the OperatingSystem_RestoreContext().

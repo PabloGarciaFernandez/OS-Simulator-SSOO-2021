@@ -21,7 +21,7 @@ void OperatingSystem_PreemptRunningProcess();
 int OperatingSystem_CreateProcess(int);
 int OperatingSystem_ObtainMainMemory(int, int);
 int OperatingSystem_ShortTermScheduler();
-int OperatingSystem_ExtractFromReadyToRun();
+int OperatingSystem_ExtractFromReadyToRun(int);
 void OperatingSystem_HandleException();
 void OperatingSystem_HandleSystemCall();
 
@@ -87,8 +87,15 @@ void OperatingSystem_Initialize(int daemonsIndex) {
 	OperatingSystem_PrepareDaemons(daemonsIndex);
 	
 	// Create all user processes from the information given in the command line
-	OperatingSystem_LongTermScheduler();
+	int longTerm = OperatingSystem_LongTermScheduler();
 	
+	if(longTerm == 0){ //EX 15
+		// finishing sipID, change PC to address of OS HALT instruction
+		OperatingSystem_TerminatingSIP();
+		ComputerSystem_DebugMessage(99,SHUTDOWN,"The system will shut down now...\n");		
+		// Simulation must finish, telling sipID to finish
+		OperatingSystem_ReadyToShutdown();
+	}
 
 	if (strcmp(programList[processTable[sipID].programListIndex]->executableName,"SystemIdleProcess")) {
 		// Show red message "FATAL ERROR: Missing SIP program!\n"
@@ -236,10 +243,10 @@ void OperatingSystem_PCBInitialization(int PID, int initialPhysicalAddress, int 
 	processTable[PID].busy=1;
 	processTable[PID].initialPhysicalAddress=initialPhysicalAddress;
 	processTable[PID].processSize=processSize;
-	processTable[PID].state=NEW;
-	ComputerSystem_DebugMessage(111,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[0]);
+	processTable[PID].state=NEW;	
 	processTable[PID].priority=priority;
 	processTable[PID].programListIndex=processPLIndex;
+	ComputerSystem_DebugMessage(111,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[0]);
 	// Daemons run in protected mode and MMU use real address
 	if (programList[processPLIndex]->type == DAEMONPROGRAM) {
 		processTable[PID].copyOfPCRegister=initialPhysicalAddress;
@@ -312,6 +319,7 @@ void OperatingSystem_RestoreContext(int PID) {
 	// New values for the CPU registers are obtained from the PCB
 	Processor_CopyInSystemStack(MAINMEMORYSIZE-1,processTable[PID].copyOfPCRegister);
 	Processor_CopyInSystemStack(MAINMEMORYSIZE-2,processTable[PID].copyOfPSWRegister);
+	Processor_SetAccumulator(processTable[PID].copyOfAccumulator); //EX 13
 	
 	// Same thing for the MMU registers
 	MMU_SetBase(processTable[PID].initialPhysicalAddress);
@@ -339,6 +347,8 @@ void OperatingSystem_SaveContext(int PID) {
 	
 	// Load PSW saved for interrupt manager
 	processTable[PID].copyOfPSWRegister=Processor_CopyFromSystemStack(MAINMEMORYSIZE-2);
+
+	processTable[PID].copyOfAccumulator = Processor_GetAccumulator(); //EX 13
 	
 }
 
@@ -402,18 +412,22 @@ void OperatingSystem_HandleSystemCall() {
 			ComputerSystem_DebugMessage(73,SYSPROC,executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName);
 			OperatingSystem_TerminateProcess();
 			break;
-		case SYSCALL_YIELD:
-			
-			if(numberOfReadyToRunProcesses[processTable[executingProcessID].queueID] > 0){
-				int processQueueID = processTable[executingProcessID].queueID;
-				int newPID = Heap_getFirst(readyToRunQueue[processQueueID] , numberOfReadyToRunProcesses[processQueueID]); //EX12 Obtains the first element of the priority process.
+		case SYSCALL_YIELD:	{
+			int processQueueID = processTable[executingProcessID].queueID;
+			if(numberOfReadyToRunProcesses[processQueueID] > 0){		
+				int currentPriority = processTable[executingProcessID].priority;				
+				int newPID = readyToRunQueue[processQueueID][0].info;
 
+				if(currentPriority == processTable[newPID].priority){
 				ComputerSystem_DebugMessage(115,SHORTTERMSCHEDULE,executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName,
 				newPID,programList[processTable[newPID].programListIndex]->executableName);
+				int selectedPID = OperatingSystem_ShortTermScheduler();
 				OperatingSystem_PreemptRunningProcess();
-				OperatingSystem_Dispatch(newPID);						
+				OperatingSystem_Dispatch(selectedPID);
+				}
 			}
-			break;		
+			break;								
+		}	
 	}
 }
 	
