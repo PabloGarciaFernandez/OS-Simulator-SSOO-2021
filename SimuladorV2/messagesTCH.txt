@@ -22,7 +22,7 @@
 
 // Assert system messages
 81,Using asserts file: %s\nMaximum number of asserts: %d\n
-82,%d Asserts Loaded\n
+82,\t%d Asserts Loaded\n
 83,Warning maximun number of asserts reached !!!  (@R%d@@)\n
 84,Illegal Assert in line @R%d@@ of file @R%s@@\n
 85,Illegal time format in line @R%d@@ of file @R%s@@\n

@@ -46,7 +46,8 @@ void ComputerSystem_PowerOn(int argc, char *argv[], int paramIndex) {
 
 // Powers off the CS (the C program ends)
 void ComputerSystem_PowerOff() {
-	// Show message in red colour: "END of the simulation\n" 
+	// Show message in red colour: "END of the simulation\n"
+	ComputerSystem_ShowTime(SHUTDOWN);
 	ComputerSystem_DebugMessage(99,SHUTDOWN,"END of the simulation\n"); 
 	exit(0);
 }
@@ -56,6 +57,7 @@ void ComputerSystem_PowerOff() {
 
 //EX 1 V1
 void ComputerSystem_PrintProgramList(){	
+	ComputerSystem_ShowTime(INIT);
 	ComputerSystem_DebugMessage(101, INIT);
 	int i;
 	for(i=1 ; i<PROGRAMSMAXNUMBER ; i++){
