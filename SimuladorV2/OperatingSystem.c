@@ -26,6 +26,7 @@ void OperatingSystem_HandleException();
 void OperatingSystem_HandleSystemCall();
 void OperatingSystem_HandleClockInterrupt();
 int OperatingSystem_ExtractFromSleeping();
+int OperatingSystem_CheckQueue();
 
 // The process table
 PCB processTable[PROCESSTABLEMAXSIZE];
@@ -490,7 +491,6 @@ void OperatingSystem_InterruptLogic(int entryPoint){
 			break;
 		case CLOCKINT_BIT: // CLOCKINT_BIT = 9
 			OperatingSystem_HandleClockInterrupt();
-			numberOfClockInterrupts++;
 			break;
 	}
 }
@@ -501,7 +501,9 @@ void OperatingSystem_HandleClockInterrupt(){
 	numberOfClockInterrupts++;
 	OperatingSystem_ShowTime(INTERRUPT);
 	ComputerSystem_DebugMessage(120,INTERRUPT,numberOfClockInterrupts);//CLOCK INTERRUPT
-	while(numberOfSleepingProcesses != 0 && processTable[sleepingProcessesQueue[0].info].whenToWakeUp == numberOfClockInterrupts){ //WHILE THERE ARE SLEEPING PROCESSES
+	//while(numberOfSleepingProcesses != 0 && processTable[sleepingProcessesQueue[0].info].whenToWakeUp == numberOfClockInterrupts){ //WHILE THERE ARE SLEEPING PROCESSES
+	int wakeup = processTable[Heap_getFirst(sleepingProcessesQueue,numberOfSleepingProcesses)].whenToWakeUp;
+	while(numberOfSleepingProcesses != 0 && wakeup == numberOfClockInterrupts){ //WHILE THERE ARE SLEEPING PROCESSES //UPDATE POST CORRECTION 
 		selectedProcess = OperatingSystem_ExtractFromSleeping();
 		OperatingSystem_MoveToTheREADYState(selectedProcess);
 
@@ -510,12 +512,9 @@ void OperatingSystem_HandleClockInterrupt(){
 	if(selectedProcess != NOPROCESS){ //IF THERE IS A PROCESS
 		OperatingSystem_PrintStatus();
 
-		int actualPriority = processTable[executingProcessID].priority; //Save the actual priority in order to compare it later
-		int nextProcessPID = OperatingSystem_ShortTermScheduler(); //Show next PID for the next program
+		int nextProcessPID = OperatingSystem_CheckQueue(); //Show next PID for the next program
 
 		if(nextProcessPID != NOPROCESS){
-			if(processTable[nextProcessPID].priority < actualPriority){ //IF THE CHECK PROCESS HAS LESS PRIORITY THAN THE ACTUAL
-
 				OperatingSystem_ShowTime(SHORTTERMSCHEDULE);
 				ComputerSystem_DebugMessage(121, SHORTTERMSCHEDULE, executingProcessID, programList[processTable[executingProcessID].programListIndex]->executableName,
 				nextProcessPID,programList[processTable[nextProcessPID].programListIndex]->executableName);
@@ -524,15 +523,28 @@ void OperatingSystem_HandleClockInterrupt(){
 				OperatingSystem_Dispatch(nextProcessPID);
 
 				OperatingSystem_PrintStatus();
-			}
-			else{ //GIVE THE PROCESSOR TO THE NEXT PROCRESS WITH BETTER PRIORITY
-
-				int nextProcessQID = processTable[nextProcessPID].queueID;
-				Heap_add(nextProcessPID, readyToRunQueue[nextProcessQID], QUEUE_PRIORITY, &numberOfReadyToRunProcesses[nextProcessQID], PROCESSTABLEMAXSIZE);
-			}
 		}
 	}
 	 return; 
+}
+
+int OperatingSystem_CheckQueue(){
+	if(processTable[executingProcessID].queueID == USERPROCESSQUEUE){
+		if(numberOfReadyToRunProcesses[USERPROCESSQUEUE] > 0 && processTable[executingProcessID].priority > processTable[Heap_getFirst(readyToRunQueue[USERPROCESSQUEUE],numberOfReadyToRunProcesses[USERPROCESSQUEUE])].priority){
+			return OperatingSystem_ShortTermScheduler();
+		}
+	}
+	else{
+		if(numberOfReadyToRunProcesses[USERPROCESSQUEUE] > 0){
+			return OperatingSystem_ShortTermScheduler();
+		}
+		else{
+			if(numberOfReadyToRunProcesses[DAEMONSQUEUE] > 0 && processTable[executingProcessID].priority > processTable[Heap_getFirst(readyToRunQueue[DAEMONSQUEUE],numberOfReadyToRunProcesses[DAEMONSQUEUE])].priority){
+				return OperatingSystem_ShortTermScheduler();
+			}
+		}
+	}	
+	return NOPROCESS;	
 }
 
 int OperatingSystem_ExtractFromSleeping(){ //EXERCISE 6 V2
