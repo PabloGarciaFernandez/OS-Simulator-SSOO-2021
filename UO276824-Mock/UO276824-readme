@@ -1,0 +1,708 @@
+messagesSTD.txt
+    550 ,The @G%s@@ for process [@G%d - %s@@] is @G%d@ \n
+
+OperatingSystem.h
+    typedef struct {
+	int busy;
+	int initialPhysicalAddress;
+	int processSize;
+	int state;
+	int priority;
+	int copyOfPCRegister;
+	unsigned int copyOfPSWRegister;
+	int programListIndex;
+	int queueID;
+	int copyOfAccumulator;
+	int numberOfClockInterrupts;
+	int whenToWakeUp; // Exercise 5-a of V2
+	int responseTime; // RESPONSE TIME
+	int returnTime; // RETURN TIME
+	int waitingTime; // WAITING TIME
+    } PCB;
+
+void OperatingSystem_PCBInitialization(int PID, int initialPhysicalAddress, int processSize, int priority, int processPLIndex) {
+
+	processTable[PID].busy=1;
+	processTable[PID].initialPhysicalAddress=initialPhysicalAddress;
+	processTable[PID].processSize=processSize;
+	processTable[PID].state=NEW;
+	processTable[PID].responseTime = 0; //INITIALIZE RESPONSE TIME TO 0 WHEN THE PROGRAM IS SET TO NEW	
+	processTable[PID].returnTime = 0; //INITIALIZE RETURN TIME TO 0 WHEN THE PROGRAM IS SET TO NEW	
+	processTable[PID].priority=priority;
+	processTable[PID].programListIndex=processPLIndex;
+	OperatingSystem_ShowTime(SYSPROC);
+	ComputerSystem_DebugMessage(111,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[0]);	
+	// Daemons run in protected mode and MMU use real address
+	if (programList[processPLIndex]->type == DAEMONPROGRAM) {
+		processTable[PID].copyOfPCRegister=initialPhysicalAddress;
+		processTable[PID].copyOfPSWRegister= ((unsigned int) 1) << EXECUTION_MODE_BIT;
+	} 
+	else {
+		processTable[PID].copyOfPCRegister=0;
+		processTable[PID].copyOfPSWRegister=0;
+	}
+	processTable[PID].queueID = programList[processPLIndex]->type;
+}
+
+void OperatingSystem_MoveToTheREADYState(int PID) {
+	
+	if (Heap_add(PID, readyToRunQueue[processTable[PID].queueID],QUEUE_PRIORITY ,&numberOfReadyToRunProcesses[processTable[PID].queueID] ,PROCESSTABLEMAXSIZE)>=0) {
+		OperatingSystem_ShowTime(SYSPROC);
+		ComputerSystem_DebugMessage(110,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[processTable[PID].state],statesNames[1]);
+		if(statesNames[processTable[PID].state] == statesNames[0]){
+			processTable[PID].waitingTime = 0; //INITIALIZE WAITING TIME TO 0 WHEN THE PROGRAM IS SET TO READY FROM NEW
+		}
+		if(statesNames[processTable[PID].state] == statesNames[2]){
+			processTable[PID].extraTime = Clock_GetTime(); //UPDATE EXTRATIME WITH CLOCK_GETTIME() WHEN YOU GET THE PROCESS COMES FROM EXECUTING
+			processTable[PID].waitingTime = processTable[PID].waitingTime + Clock_GetTime() - processTable[PID].extraTime; //UPDATE EXTRATIME WITH WAITING TIME + CLOCK_GETTIME() - EXTRATIME WHEN YOU GET THE PROCESS COMES FROM EXECUTING
+		}
+		if(statesNames[processTable[PID].state] == statesNames[3]){
+			processTable[PID].extraTime = Clock_GetTime(); //UPDATE EXTRATIME WITH CLOCK_GETTIME() WHEN YOU GET THE PROCESS COMES FROM BLOCKED
+			processTable[PID].waitingTime = processTable[PID].waitingTime + Clock_GetTime() - processTable[PID].extraTime; //UPDATE EXTRATIME WITH WAITING TIME + CLOCK_GETTIME() - EXTRATIME WHEN YOU GET THE PROCESS COMES FROM BLOCKED
+		}
+		processTable[PID].state=READY;
+		processTable[PID].responseTime = Clock_GetTime(); //UPDATE RESPONSE TIME TO CLOCK_GETTIME() WHEN THE PROGRAM IS SET TO READY		
+	} 
+	//OperatingSystem_PrintReadyToRunQueue();
+}
+
+void OperatingSystem_TerminateProcess() {
+  
+	int selectedProcess;
+  	OperatingSystem_ShowTime(SYSPROC);
+	ComputerSystem_DebugMessage(110,SYSPROC,executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName,
+		statesNames[processTable[executingProcessID].state],statesNames[4]);
+	processTable[executingProcessID].state=EXIT;
+	processTable[executingProcessID].returnTime = Clock_GetTime(); //UPDATE RETURN TIME TO CLOCK_GETTIME() WHEN THE PROGRAM IS SET TO EXIT
+	OperatingSystem_ShowTime(SYSPROC);
+	ComputerSystem_DebugMessage(550, SYSPROC, "response time", executingProcessID, programList[processTable[executingProcessID].programListIndex]->executableName,
+		processTable[executingProcessID].responseTime);
+	OperatingSystem_ShowTime(SYSPROC);
+	ComputerSystem_DebugMessage(550, SYSPROC, "return time", executingProcessID, programList[processTable[executingProcessID].programListIndex]->executableName,
+		processTable[executingProcessID].returnTime);
+	OperatingSystem_ShowTime(SYSPROC);
+	ComputerSystem_DebugMessage(550, SYSPROC, "waiting time", executingProcessID, programList[processTable[executingProcessID].programListIndex]->executableName,
+		processTable[executingProcessID].waitingTime);
+	
+	if (programList[processTable[executingProcessID].programListIndex]->type==USERPROGRAM) 
+		// One more user process that has terminated
+		numberOfNotTerminatedUserProcesses--;
+	
+	if (numberOfNotTerminatedUserProcesses==0) {
+		if (executingProcessID==sipID) {
+			// finishing sipID, change PC to address of OS HALT instruction
+			OperatingSystem_TerminatingSIP();
+			OperatingSystem_ShowTime(SHUTDOWN);
+			ComputerSystem_DebugMessage(99,SHUTDOWN,"The system will shut down now...\n");
+			return; // Don't dispatch any process
+		}
+		// Simulation must finish, telling sipID to finish
+		OperatingSystem_ReadyToShutdown();
+	}
+	// Select the next process to execute (sipID if no more user processes)
+	selectedProcess=OperatingSystem_ShortTermScheduler();	
+
+	// Assign the processor to that process
+	OperatingSystem_Dispatch(selectedProcess);
+}
+
+void OperatingSystem_Dispatch(int PID) {
+
+	// The process identified by PID becomes the current executing process
+	executingProcessID=PID;
+	OperatingSystem_ShowTime(SYSPROC);
+	ComputerSystem_DebugMessage(110,SYSPROC,PID,programList[processTable[PID].programListIndex]->executableName,statesNames[processTable[PID].state],statesNames[2]);
+	processTable[PID].waitingTime = processTable[PID].waitingTime + Clock_GetTime(); //UPDATE WAITING TIME TO THE TIME BEFORE + CLOCK_GETTIME() WHEN THE PROGRAM IS SET TO EXECUTING
+	// Change the process' state
+	processTable[PID].state=EXECUTING;
+	processTable[PID].extraTime = 0; //INITIALIZE OR RESET EXTRA TO ZERO, IT IS USED TO GET AN ACCURATE WAITING TIME
+	// Modify hardware registers with appropriate values for the process identified by PID
+	OperatingSystem_RestoreContext(PID);
+}
+
+make clean
+make
+
+./Simulator p1
+33 messages loaded from file messagesTCH.txt
+16 messages loaded from file messagesSTD.txt
+[0] User program list: 
+        Program [p1] with arrival time [0] 
+        0 Asserts Loaded
+        [0] New process [3 - SystemIdleProcess] moving to the [NEW] state 
+        [0] Process [3] created from program [SystemIdleProcess]
+        [0] Process [3 - SystemIdleProcess] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER:
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 3 -> SystemIdleProcess
+        [0] New process [0 - p1] moving to the [NEW] state 
+        [0] Process [0] created from program [p1]
+        [0] Process [0 - p1] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER: [0,1]
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 0 -> p1
+                PID: 3 -> SystemIdleProcess
+        [0] Process [0 - p1] moving from the [READY] state to the [EXECUTING] state 
+[1] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[2] {01 00A 80D} ADD 10 -13 (PC: 1, Accumulator: -3, PSW: 0004 [-------------N--])
+[3] {05 000 000} NOP 0 0 (PC: 2, Accumulator: -3, PSW: 0004 [-------------N--])
+[4] {08 00F 000} WRITE 15 0 (PC: 3, Accumulator: -3, PSW: 0004 [-------------N--])
+[5] {04 003 000} TRAP 3 0 (PC: 4, Accumulator: -3, PSW: 0004 [-------------N--])
+[6] {0C 002 000} OS 2 0 (PC: 242, Accumulator: -3, PSW: 8084 [M-------X----N--])
+        [7] Process [0 - p1] has requested to terminate
+        [7] Process [0 - p1] moving from the [EXECUTING] state to the [EXIT] state 
+        [7] The response time for process [0 - p1] is 0
+        [7] The return time for process [0 - p1] is 7
+        [7] The waiting time for process [0 - p1] is 0
+        [7] Process [3 - SystemIdleProcess] moving from the [READY] state to the [EXECUTING] state 
+        [7] Running Process Information:
+                [PID: 3, Priority: 100, WakeUp: 0, Queue: DAEMONS]
+        [7] Ready-to-run process queue:
+                USER:
+                DAEMONS:
+        [7] SLEEPING Queue:
+                [--- empty queue ---]
+        [7] PID association with program's name:
+                PID: 0 -> p1
+                PID: 3 -> SystemIdleProcess
+[8] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[9] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [10] Clock interrupt number [1] has occurred 
+[11] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[12] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [13] Clock interrupt number [2] has occurred 
+[14] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[15] {04 003 000} TRAP 3 0 (PC: 184, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[16] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [17] Process [3 - SystemIdleProcess] has requested to terminate
+        [17] Process [3 - SystemIdleProcess] moving from the [EXECUTING] state to the [EXIT] state 
+        [17] The response time for process [3 - SystemIdleProcess] is 0
+        [17] The return time for process [3 - SystemIdleProcess] is 17
+        [17] The waiting time for process [3 - SystemIdleProcess] is 7
+        [17] The system will shut down now...
+        [17] Running Process Information:
+                [--- No running process ---]
+        [17] Ready-to-run process queue:
+                USER:
+                DAEMONS:
+        [17] SLEEPING Queue:
+                [--- empty queue ---]
+        [17] PID association with program's name:
+                PID: 0 -> p1
+                PID: 3 -> SystemIdleProcess
+[18] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[19] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [20] Clock interrupt number [3] has occurred 
+[21] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[22] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [23] Clock interrupt number [4] has occurred 
+[24] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[25] {0B 000 000} HALT 0 0 (PC: 241, Accumulator: 0, PSW: 0083 [--------X-----ZS])
+[25] END of the simulation
+
+./Simulator p2 p3
+
+33 messages loaded from file messagesTCH.txt
+16 messages loaded from file messagesSTD.txt
+[0] User program list: 
+        Program [p2] with arrival time [0] 
+        Program [p3] with arrival time [0] 
+        0 Asserts Loaded
+        [0] New process [3 - SystemIdleProcess] moving to the [NEW] state 
+        [0] Process [3] created from program [SystemIdleProcess]
+        [0] Process [3 - SystemIdleProcess] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER:
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 3 -> SystemIdleProcess
+        [0] New process [0 - p2] moving to the [NEW] state 
+        [0] Process [0] created from program [p2]
+        [0] Process [0 - p2] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER: [0,10]
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 0 -> p2
+                PID: 3 -> SystemIdleProcess
+        [0] New process [1 - p3] moving to the [NEW] state 
+        [0] Process [1] created from program [p3]
+        [0] Process [1 - p3] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER: [0,10], [1,10]
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 3 -> SystemIdleProcess
+        [0] Process [0 - p2] moving from the [READY] state to the [EXECUTING] state 
+[1] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[2] {01 00A 001} ADD 10 1 (PC: 1, Accumulator: 11, PSW: 0000 [----------------])
+[3] {04 004 000} TRAP 4 0 (PC: 2, Accumulator: 11, PSW: 0000 [----------------])
+[4] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 11, PSW: 8080 [M-------X-------])
+Process [0 - p2] will transfer the control of the processor to process [1 - p3] 
+        [5] Process [0 - p2] moving from the [EXECUTING] state to the [READY] state 
+        [5] Process [1 - p3] moving from the [READY] state to the [EXECUTING] state 
+        [5] Running Process Information:
+                [PID: 1, Priority: 10, WakeUp: 0, Queue: USER]
+        [5] Ready-to-run process queue:
+                USER: [0,10]
+                DAEMONS: [3,100]
+        [5] SLEEPING Queue:
+                [--- empty queue ---]
+        [5] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 3 -> SystemIdleProcess
+[6] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[7] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [8] Clock interrupt number [1] has occurred 
+[9] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[10] {01 00C 032} ADD 12 50 (PC: 1, Accumulator: 62, PSW: 0000 [----------------])
+[11] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 62, PSW: 8080 [M-------X-------])
+        [12] Clock interrupt number [2] has occurred 
+[13] {0D 000 000} IRET 0 0 (PC: 1, Accumulator: 62, PSW: 0000 [----------------])
+[14] {04 004 000} TRAP 4 0 (PC: 2, Accumulator: 62, PSW: 0000 [----------------])
+[15] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 62, PSW: 8080 [M-------X-------])
+Process [1 - p3] will transfer the control of the processor to process [0 - p2] 
+        [16] Process [1 - p3] moving from the [EXECUTING] state to the [READY] state 
+        [16] Process [0 - p2] moving from the [READY] state to the [EXECUTING] state 
+        [16] Running Process Information:
+                [PID: 0, Priority: 10, WakeUp: 0, Queue: USER]
+        [16] Ready-to-run process queue:
+                USER: [1,10]
+                DAEMONS: [3,100]
+        [16] SLEEPING Queue:
+                [--- empty queue ---]
+        [16] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 3 -> SystemIdleProcess
+[17] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 11, PSW: 0000 [----------------])
+[18] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 11, PSW: 8080 [M-------X-------])
+        [19] Clock interrupt number [3] has occurred 
+[20] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 11, PSW: 0000 [----------------])
+[21] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 11, PSW: 8080 [M-------X-------])
+        [22] Clock interrupt number [4] has occurred 
+[23] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 11, PSW: 0000 [----------------])
+[24] {04 003 000} TRAP 3 0 (PC: 3, Accumulator: 11, PSW: 0000 [----------------])
+[25] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 11, PSW: 8080 [M-------X-------])
+        [26] Process [0 - p2] has requested to terminate
+        [26] Process [0 - p2] moving from the [EXECUTING] state to the [EXIT] state 
+        [26] The response time for process [0 - p2] is 5
+        [26] The return time for process [0 - p2] is 26
+        [26] The waiting time for process [0 - p2] is 16
+        [26] Process [1 - p3] moving from the [READY] state to the [EXECUTING] state 
+        [26] Running Process Information:
+                [PID: 1, Priority: 10, WakeUp: 0, Queue: USER]
+        [26] Ready-to-run process queue:
+                USER:
+                DAEMONS: [3,100]
+        [26] SLEEPING Queue:
+                [--- empty queue ---]
+        [26] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 3 -> SystemIdleProcess
+[27] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 62, PSW: 0000 [----------------])
+[28] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 62, PSW: 8080 [M-------X-------])
+        [29] Clock interrupt number [5] has occurred 
+[30] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 62, PSW: 0000 [----------------])
+[31] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 62, PSW: 8080 [M-------X-------])
+        [32] Clock interrupt number [6] has occurred 
+[33] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 62, PSW: 0000 [----------------])
+[34] {04 003 000} TRAP 3 0 (PC: 3, Accumulator: 62, PSW: 0000 [----------------])
+[35] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 62, PSW: 8080 [M-------X-------])
+        [36] Process [1 - p3] has requested to terminate
+        [36] Process [1 - p3] moving from the [EXECUTING] state to the [EXIT] state 
+        [36] The response time for process [1 - p3] is 16
+        [36] The return time for process [1 - p3] is 36
+        [36] The waiting time for process [1 - p3] is 31
+        [36] Process [3 - SystemIdleProcess] moving from the [READY] state to the [EXECUTING] state 
+        [36] Running Process Information:
+                [PID: 3, Priority: 100, WakeUp: 0, Queue: DAEMONS]
+        [36] Ready-to-run process queue:
+                USER:
+                DAEMONS:
+        [36] SLEEPING Queue:
+                [--- empty queue ---]
+        [36] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 3 -> SystemIdleProcess
+[37] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[38] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [39] Clock interrupt number [7] has occurred 
+[40] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[41] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [42] Clock interrupt number [8] has occurred 
+[43] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[44] {04 003 000} TRAP 3 0 (PC: 184, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[45] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [46] Process [3 - SystemIdleProcess] has requested to terminate
+        [46] Process [3 - SystemIdleProcess] moving from the [EXECUTING] state to the [EXIT] state 
+        [46] The response time for process [3 - SystemIdleProcess] is 0
+        [46] The return time for process [3 - SystemIdleProcess] is 46
+        [46] The waiting time for process [3 - SystemIdleProcess] is 36
+        [46] The system will shut down now...
+        [46] Running Process Information:
+                [--- No running process ---]
+        [46] Ready-to-run process queue:
+                USER:
+                DAEMONS:
+        [46] SLEEPING Queue:
+                [--- empty queue ---]
+        [46] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 3 -> SystemIdleProcess
+[47] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[48] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [49] Clock interrupt number [9] has occurred 
+[50] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[51] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [52] Clock interrupt number [10] has occurred 
+[53] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[54] {0B 000 000} HALT 0 0 (PC: 241, Accumulator: 0, PSW: 0083 [--------X-----ZS])
+[54] END of the simulation
+
+./Simulator p2 p3 p4
+
+33 messages loaded from file messagesTCH.txt
+16 messages loaded from file messagesSTD.txt
+[0] User program list: 
+        Program [p2] with arrival time [0] 
+        Program [p3] with arrival time [0] 
+        Program [p4] with arrival time [0] 
+        0 Asserts Loaded
+        [0] New process [3 - SystemIdleProcess] moving to the [NEW] state 
+        [0] Process [3] created from program [SystemIdleProcess]
+        [0] Process [3 - SystemIdleProcess] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER:
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 3 -> SystemIdleProcess
+        [0] New process [0 - p2] moving to the [NEW] state 
+        [0] Process [0] created from program [p2]
+        [0] Process [0 - p2] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER: [0,10]
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 0 -> p2
+                PID: 3 -> SystemIdleProcess
+        [0] New process [1 - p3] moving to the [NEW] state 
+        [0] Process [1] created from program [p3]
+        [0] Process [1 - p3] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER: [0,10], [1,10]
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 3 -> SystemIdleProcess
+        [0] New process [2 - p4] moving to the [NEW] state 
+        [0] Process [2] created from program [p4]
+        [0] Process [2 - p4] moving from the [NEW] state to the [READY] state 
+        [0] Running Process Information:
+                [--- No running process ---]
+        [0] Ready-to-run process queue:
+                USER: [0,10], [1,10], [2,10]
+                DAEMONS: [3,100]
+        [0] SLEEPING Queue:
+                [--- empty queue ---]
+        [0] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+        [0] Process [0 - p2] moving from the [READY] state to the [EXECUTING] state 
+[1] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[2] {01 00A 001} ADD 10 1 (PC: 1, Accumulator: 11, PSW: 0000 [----------------])
+[3] {04 004 000} TRAP 4 0 (PC: 2, Accumulator: 11, PSW: 0000 [----------------])
+[4] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 11, PSW: 8080 [M-------X-------])
+Process [0 - p2] will transfer the control of the processor to process [1 - p3] 
+        [5] Process [0 - p2] moving from the [EXECUTING] state to the [READY] state 
+        [5] Process [1 - p3] moving from the [READY] state to the [EXECUTING] state 
+        [5] Running Process Information:
+                [PID: 1, Priority: 10, WakeUp: 0, Queue: USER]
+        [5] Ready-to-run process queue:
+                USER: [2,10], [0,10]
+                DAEMONS: [3,100]
+        [5] SLEEPING Queue:
+                [--- empty queue ---]
+        [5] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+[6] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[7] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [8] Clock interrupt number [1] has occurred 
+[9] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[10] {01 00C 032} ADD 12 50 (PC: 1, Accumulator: 62, PSW: 0000 [----------------])
+[11] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 62, PSW: 8080 [M-------X-------])
+        [12] Clock interrupt number [2] has occurred 
+[13] {0D 000 000} IRET 0 0 (PC: 1, Accumulator: 62, PSW: 0000 [----------------])
+[14] {04 004 000} TRAP 4 0 (PC: 2, Accumulator: 62, PSW: 0000 [----------------])
+[15] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 62, PSW: 8080 [M-------X-------])
+Process [1 - p3] will transfer the control of the processor to process [2 - p4] 
+        [16] Process [1 - p3] moving from the [EXECUTING] state to the [READY] state 
+        [16] Process [2 - p4] moving from the [READY] state to the [EXECUTING] state 
+        [16] Running Process Information:
+                [PID: 2, Priority: 10, WakeUp: 0, Queue: USER]
+        [16] Ready-to-run process queue:
+                USER: [0,10], [1,10]
+                DAEMONS: [3,100]
+        [16] SLEEPING Queue:
+                [--- empty queue ---]
+        [16] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+[17] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[18] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [19] Clock interrupt number [3] has occurred 
+[20] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[21] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [22] Clock interrupt number [4] has occurred 
+[23] {0D 000 000} IRET 0 0 (PC: 0, Accumulator: 0, PSW: 0002 [--------------Z-])
+[24] {01 005 008} ADD 5 8 (PC: 1, Accumulator: 13, PSW: 0000 [----------------])
+[25] {04 007 000} TRAP 7 0 (PC: 2, Accumulator: 13, PSW: 0000 [----------------])
+[26] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 13, PSW: 8080 [M-------X-------])
+        [27] Process [2 - p4] moving from the [EXECUTING] state to the [BLOCKED] state 
+        [27] Process [0 - p2] moving from the [READY] state to the [EXECUTING] state 
+        [27] Running Process Information:
+                [PID: 0, Priority: 10, WakeUp: 0, Queue: USER]
+        [27] Ready-to-run process queue:
+                USER: [1,10]
+                DAEMONS: [3,100]
+        [27] SLEEPING Queue:
+                [2, 10, 18]
+        [27] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+[28] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 11, PSW: 0000 [----------------])
+[29] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 11, PSW: 8080 [M-------X-------])
+        [30] Clock interrupt number [5] has occurred 
+[31] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 11, PSW: 0000 [----------------])
+[32] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 11, PSW: 8080 [M-------X-------])
+        [33] Clock interrupt number [6] has occurred 
+[34] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 11, PSW: 0000 [----------------])
+[35] {04 003 000} TRAP 3 0 (PC: 3, Accumulator: 11, PSW: 0000 [----------------])
+[36] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 11, PSW: 8080 [M-------X-------])
+        [37] Process [0 - p2] has requested to terminate
+        [37] Process [0 - p2] moving from the [EXECUTING] state to the [EXIT] state 
+        [37] The response time for process [0 - p2] is 5
+        [37] The return time for process [0 - p2] is 37
+        [37] The waiting time for process [0 - p2] is 27
+        [37] Process [1 - p3] moving from the [READY] state to the [EXECUTING] state 
+        [37] Running Process Information:
+                [PID: 1, Priority: 10, WakeUp: 0, Queue: USER]
+        [37] Ready-to-run process queue:
+                USER:
+                DAEMONS: [3,100]
+        [37] SLEEPING Queue:
+                [2, 10, 18]
+        [37] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+[38] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 62, PSW: 0000 [----------------])
+[39] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 62, PSW: 8080 [M-------X-------])
+        [40] Clock interrupt number [7] has occurred 
+[41] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 62, PSW: 0000 [----------------])
+[42] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 62, PSW: 8080 [M-------X-------])
+        [43] Clock interrupt number [8] has occurred 
+[44] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 62, PSW: 0000 [----------------])
+[45] {04 003 000} TRAP 3 0 (PC: 3, Accumulator: 62, PSW: 0000 [----------------])
+[46] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 62, PSW: 8080 [M-------X-------])
+        [47] Process [1 - p3] has requested to terminate
+        [47] Process [1 - p3] moving from the [EXECUTING] state to the [EXIT] state 
+        [47] The response time for process [1 - p3] is 16
+        [47] The return time for process [1 - p3] is 47
+        [47] The waiting time for process [1 - p3] is 42
+        [47] Process [3 - SystemIdleProcess] moving from the [READY] state to the [EXECUTING] state 
+        [47] Running Process Information:
+                [PID: 3, Priority: 100, WakeUp: 0, Queue: DAEMONS]
+        [47] Ready-to-run process queue:
+                USER:
+                DAEMONS:
+        [47] SLEEPING Queue:
+                [2, 10, 18]
+        [47] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+[48] {0D 000 000} IRET 0 0 (PC: 180, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[49] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [50] Clock interrupt number [9] has occurred 
+[51] {0D 000 000} IRET 0 0 (PC: 180, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[52] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 0, PSW: 8082 [M-------X-----Z-])
+        [53] Clock interrupt number [10] has occurred 
+[54] {0D 000 000} IRET 0 0 (PC: 180, Accumulator: 0, PSW: 0082 [--------X-----Z-])
+[55] {01 518 2CD} ADD 1304 717 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[56] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [57] Clock interrupt number [11] has occurred 
+[58] {0D 000 000} IRET 0 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[59] {05 000 000} NOP 0 0 (PC: 182, Accumulator: 2021, PSW: 0080 [--------X-------])
+[60] {06 801 000} JUMP -1 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[61] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [62] Clock interrupt number [12] has occurred 
+[63] {0D 000 000} IRET 0 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[64] {05 000 000} NOP 0 0 (PC: 182, Accumulator: 2021, PSW: 0080 [--------X-------])
+[65] {06 801 000} JUMP -1 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[66] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [67] Clock interrupt number [13] has occurred 
+[68] {0D 000 000} IRET 0 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[69] {05 000 000} NOP 0 0 (PC: 182, Accumulator: 2021, PSW: 0080 [--------X-------])
+[70] {06 801 000} JUMP -1 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[71] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [72] Clock interrupt number [14] has occurred 
+[73] {0D 000 000} IRET 0 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[74] {05 000 000} NOP 0 0 (PC: 182, Accumulator: 2021, PSW: 0080 [--------X-------])
+[75] {06 801 000} JUMP -1 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[76] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [77] Clock interrupt number [15] has occurred 
+[78] {0D 000 000} IRET 0 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[79] {05 000 000} NOP 0 0 (PC: 182, Accumulator: 2021, PSW: 0080 [--------X-------])
+[80] {06 801 000} JUMP -1 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[81] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [82] Clock interrupt number [16] has occurred 
+[83] {0D 000 000} IRET 0 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[84] {05 000 000} NOP 0 0 (PC: 182, Accumulator: 2021, PSW: 0080 [--------X-------])
+[85] {06 801 000} JUMP -1 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[86] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [87] Clock interrupt number [17] has occurred 
+[88] {0D 000 000} IRET 0 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[89] {05 000 000} NOP 0 0 (PC: 182, Accumulator: 2021, PSW: 0080 [--------X-------])
+[90] {06 801 000} JUMP -1 0 (PC: 181, Accumulator: 2021, PSW: 0080 [--------X-------])
+[91] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [92] Clock interrupt number [18] has occurred 
+        [92] Process [2 - p4] moving from the [BLOCKED] state to the [READY] state 
+        [92] Running Process Information:
+                [PID: 3, Priority: 100, WakeUp: 0, Queue: DAEMONS]
+        [92] Ready-to-run process queue:
+                USER: [2,10]
+                DAEMONS:
+        [92] SLEEPING Queue:
+                [--- empty queue ---]
+        [92] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+        [92] Process [3 - SystemIdleProcess] is thrown out of the processor by process [2 - p4] 
+        [92] Process [3 - SystemIdleProcess] moving from the [EXECUTING] state to the [READY] state 
+        [92] Process [2 - p4] moving from the [READY] state to the [EXECUTING] state 
+        [92] Running Process Information:
+                [PID: 2, Priority: 10, WakeUp: 18, Queue: USER]
+        [92] Ready-to-run process queue:
+                USER:
+                DAEMONS: [3,100]
+        [92] SLEEPING Queue:
+                [--- empty queue ---]
+        [92] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+[93] {0D 000 000} IRET 0 0 (PC: 2, Accumulator: 13, PSW: 0000 [----------------])
+[94] {04 003 000} TRAP 3 0 (PC: 3, Accumulator: 13, PSW: 0000 [----------------])
+[95] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 13, PSW: 8080 [M-------X-------])
+        [96] Process [2 - p4] has requested to terminate
+        [96] Process [2 - p4] moving from the [EXECUTING] state to the [EXIT] state 
+        [96] The response time for process [2 - p4] is 92
+        [96] The return time for process [2 - p4] is 96
+        [96] The waiting time for process [2 - p4] is 108
+        [96] Process [3 - SystemIdleProcess] moving from the [READY] state to the [EXECUTING] state 
+        [96] Running Process Information:
+                [PID: 3, Priority: 100, WakeUp: 0, Queue: DAEMONS]
+        [96] Ready-to-run process queue:
+                USER:
+                DAEMONS:
+        [96] SLEEPING Queue:
+                [--- empty queue ---]
+        [96] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+[97] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 2021, PSW: 0080 [--------X-------])
+[98] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [99] Clock interrupt number [19] has occurred 
+[100] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 2021, PSW: 0080 [--------X-------])
+[101] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [102] Clock interrupt number [20] has occurred 
+[103] {0D 000 000} IRET 0 0 (PC: 183, Accumulator: 2021, PSW: 0080 [--------X-------])
+[104] {04 003 000} TRAP 3 0 (PC: 184, Accumulator: 2021, PSW: 0080 [--------X-------])
+[105] {0C 002 000} OS 2 0 (PC: 242, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [106] Process [3 - SystemIdleProcess] has requested to terminate
+        [106] Process [3 - SystemIdleProcess] moving from the [EXECUTING] state to the [EXIT] state 
+        [106] The response time for process [3 - SystemIdleProcess] is 92
+        [106] The return time for process [3 - SystemIdleProcess] is 106
+        [106] The waiting time for process [3 - SystemIdleProcess] is 143
+        [106] The system will shut down now...
+        [106] Running Process Information:
+                [--- No running process ---]
+        [106] Ready-to-run process queue:
+                USER:
+                DAEMONS:
+        [106] SLEEPING Queue:
+                [--- empty queue ---]
+        [106] PID association with program's name:
+                PID: 0 -> p2
+                PID: 1 -> p3
+                PID: 2 -> p4
+                PID: 3 -> SystemIdleProcess
+[107] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 2021, PSW: 0080 [--------X-------])
+[108] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [109] Clock interrupt number [21] has occurred 
+[110] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 2021, PSW: 0080 [--------X-------])
+[111] {0C 009 000} OS 9 0 (PC: 246, Accumulator: 2021, PSW: 8080 [M-------X-------])
+        [112] Clock interrupt number [22] has occurred 
+[113] {0D 000 000} IRET 0 0 (PC: 241, Accumulator: 2021, PSW: 0080 [--------X-------])
+[114] {0B 000 000} HALT 0 0 (PC: 241, Accumulator: 2021, PSW: 0081 [--------X------S])
+[114] END of the simulation

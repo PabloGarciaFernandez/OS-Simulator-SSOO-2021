@@ -1,0 +1,4 @@
+When the SystemIdleProcess is finishing the if (numberOfNotTerminatedUserProcesses==0) is true so it will execute this two lines:
+    OperatingSystem_TerminatingSIP();
+    ComputerSystem_DebugMessage(99,SHUTDOWN,"The system will shut down now...\n");
+that will finish the simulation.
