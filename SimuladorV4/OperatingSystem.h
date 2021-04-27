@@ -15,7 +15,7 @@
 
 #define NOFREEENTRY -3
 #define TOOBIGPROCESS -4
-
+#define MEMORYFULL -5
 #define NOPROCESS -1
 
 //EXERCISE 11
@@ -24,6 +24,9 @@ enum TypeOfReadyToRunProcessQueues { USERPROCESSQUEUE, DAEMONSQUEUE};
 
 //EXERCISE 5 V2
 #define SLEEPINGQUEUE
+
+// Partitions configuration file name definition
+#define MEMCONFIG "MemConfig" // in OperatingSystem.h
 
 // Contains the possible type of programs
 enum ProgramTypes { USERPROGRAM, DAEMONPROGRAM }; 

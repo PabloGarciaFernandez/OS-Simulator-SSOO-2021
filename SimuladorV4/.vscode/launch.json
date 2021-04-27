@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/Simulator",
-            "args": ["prog-V2-Exceptions"],
+            "args": ["programV4-1", "0", "programV4-2" ,"22", "programV4-3", "44", "programV4-4", "66", "programV4-5", "88"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

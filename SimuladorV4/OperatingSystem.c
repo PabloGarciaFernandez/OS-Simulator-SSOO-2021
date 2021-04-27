@@ -39,6 +39,7 @@ int OS_address_base = PROCESSTABLEMAXSIZE * MAINMEMORYSECTIONSIZE;
 // Identifier of the current executing process
 int executingProcessID=NOPROCESS;
 
+
 // Identifier of the System Idle Process
 int sipID;
 
@@ -70,6 +71,9 @@ int numberOfClockInterrupts = 0;
 // Heap with blocked processes sorted by when to wakeup
 heapItem sleepingProcessesQueue[PROCESSTABLEMAXSIZE];
 int numberOfSleepingProcesses=0;
+
+//NUMBER OF TOTAL INITIALIZED PARTITIONS
+int numOfTotalInitializedPartitions;
 
 // Initial set of tasks of the OS
 void OperatingSystem_Initialize(int daemonsIndex) {
@@ -105,10 +109,12 @@ void OperatingSystem_Initialize(int daemonsIndex) {
 	// V3 EX1 D
 	OperatingSystem_PrintStatus();	
 
+	numOfTotalInitializedPartitions = OperatingSystem_InitializePartitionTable(); //V4 EX5
+
 	// Create all user processes from the information given in the command line
 	OperatingSystem_LongTermScheduler();
 	
-	if(numberOfNotTerminatedUserProcesses == 0){ //EX 15
+	if(numberOfNotTerminatedUserProcesses == 0 && OperatingSystem_IsThereANewProgram() == EMPTYQUEUE){ //EX 15
 		// finishing sipID, change PC to address of OS HALT instruction
 		OperatingSystem_TerminatingSIP();
 		OperatingSystem_ShowTime(SHUTDOWN);
@@ -182,6 +188,7 @@ int OperatingSystem_LongTermScheduler() {
 		else{
 			int nextSuitableProccess = OperatingSystem_CheckLTS();
 			if(nextSuitableProccess != NOPROCESS){
+				OperatingSystem_ShowTime(SHORTTERMSCHEDULE);
 				ComputerSystem_DebugMessage(131,SHORTTERMSCHEDULE,PID,programList[i]->executableName,nextSuitableProccess,programList[processTable[nextSuitableProccess].programListIndex]->executableName);
 				PID = nextSuitableProccess;
 			}
@@ -254,10 +261,23 @@ int OperatingSystem_CreateProcess(int indexOfExecutableProgram) {
 	}
 	
 	// Obtain enough memory space
- 	loadingPhysicalAddress=OperatingSystem_ObtainMainMemory(processSize, PID);
+	int selectedPartition = OperatingSystem_ObtainMainMemory(processSize, PID); //V4 EX6 C
+ 	loadingPhysicalAddress=partitionsTable[selectedPartition].initAddress; //V4 EX6 C
 
 	if(loadingPhysicalAddress < 0){
-		return TOOBIGPROCESS; //CHANGE EX6
+		if(loadingPhysicalAddress == TOOBIGPROCESS){
+			return TOOBIGPROCESS; //CHANGE EX6
+		}			
+		if(loadingPhysicalAddress == MEMORYFULL){
+			OperatingSystem_ShowTime(ERROR); //V4 EX6 D
+			ComputerSystem_DebugMessage(144,ERROR,programList[processTable[PID].programListIndex]->executableName);
+			return MEMORYFULL;
+		}
+	}
+	else{
+		OperatingSystem_ShowTime(SYSMEM); //V4 EX6 C
+		ComputerSystem_DebugMessage(143,SYSMEM,selectedPartition,loadingPhysicalAddress,partitionsTable[selectedPartition].size,
+			PID, programList[processTable[PID].programListIndex]->executableName);	
 	}
 
 	// Load program in the allocated memory
@@ -282,11 +302,34 @@ int OperatingSystem_CreateProcess(int indexOfExecutableProgram) {
 // Main memory is assigned in chunks. All chunks are the same size. A process
 // always obtains the chunk whose position in memory is equal to the processor identifier
 int OperatingSystem_ObtainMainMemory(int processSize, int PID) {
+	int i;
+	int minimumActual = 10000000;
+	int minimumNext = 0;
+	int iSelect = -1;
+	for(i = 0; i<numOfTotalInitializedPartitions; i++){
+		if(partitionsTable[i].size >= processSize && partitionsTable[i].PID == NOPROCESS){
+			minimumNext = partitionsTable[i].size;
+			if(minimumActual > minimumNext){
+				minimumActual = minimumNext;
+				iSelect = i;
+			}
+		}
+	}
 
- 	if (processSize>MAINMEMORYSECTIONSIZE)
+	partitionsTable[iSelect].PID = PID;
+
+	OperatingSystem_ShowTime(SYSMEM);
+	ComputerSystem_DebugMessage(142,SYSMEM,PID,programList[processTable[PID].programListIndex]->executableName,processSize);
+
+ 	if (processSize>MAINMEMORYSECTIONSIZE){
 		return TOOBIGPROCESS;
-	
- 	return PID*MAINMEMORYSECTIONSIZE;
+	}		
+
+	if(iSelect == -1){
+		return MEMORYFULL;
+	}
+
+ 	return iSelect;
 }
 
 
@@ -451,7 +494,7 @@ void OperatingSystem_TerminateProcess() {
 		numberOfNotTerminatedUserProcesses--;
 		
 	
-	if (numberOfNotTerminatedUserProcesses==0) {
+	if (numberOfNotTerminatedUserProcesses==0 && OperatingSystem_IsThereANewProgram() == EMPTYQUEUE) {
 		if (executingProcessID==sipID) {
 			// finishing sipID, change PC to address of OS HALT instruction
 			OperatingSystem_TerminatingSIP();
@@ -559,6 +602,7 @@ void OperatingSystem_HandleClockInterrupt(){
 	numberOfClockInterrupts++;
 	OperatingSystem_ShowTime(INTERRUPT);
 	ComputerSystem_DebugMessage(120,INTERRUPT,numberOfClockInterrupts);//CLOCK INTERRUPT
+	int actualProcesses = numberOfReadyToRunProcesses[USERPROGRAM] + numberOfReadyToRunProcesses[DAEMONPROGRAM];
 	//while(numberOfSleepingProcesses != 0 && processTable[sleepingProcessesQueue[0].info].whenToWakeUp == numberOfClockInterrupts){ //WHILE THERE ARE SLEEPING PROCESSES
 	int wakeup = processTable[Heap_getFirst(sleepingProcessesQueue,numberOfSleepingProcesses)].whenToWakeUp;
 	while(numberOfSleepingProcesses != 0 && wakeup == numberOfClockInterrupts){ //WHILE THERE ARE SLEEPING PROCESSES //UPDATE POST CORRECTION 
@@ -569,11 +613,15 @@ void OperatingSystem_HandleClockInterrupt(){
 
 	OperatingSystem_LongTermScheduler(); //V3 EX4 A
 
-	if(selectedProcess == NOPROCESS){ //V3 EX5 A
-		selectedProcess = OperatingSystem_CheckQueue();
+
+	if (numberOfNotTerminatedUserProcesses == 0 && OperatingSystem_IsThereANewProgram() == EMPTYQUEUE && executingProcessID == sipID)
+	{
+		OperatingSystem_ReadyToShutdown();
 	}
 
-	if(selectedProcess != NOPROCESS){ //IF THERE IS A PROCESS
+	int actualNewProcesses = numberOfReadyToRunProcesses[USERPROGRAM] + numberOfReadyToRunProcesses[DAEMONPROGRAM];
+
+	if (actualProcesses < actualNewProcesses){ //IF THERE IS A PROCESS
 		OperatingSystem_PrintStatus();
 
 		int nextProcessPID = OperatingSystem_CheckQueue(); //Show next PID for the next program

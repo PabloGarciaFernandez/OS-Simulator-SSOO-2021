@@ -5,6 +5,6 @@ HALT // Shutdown the System
 OS 2 // SysCall Interrupt
 IRET
 OS 6 // Exception Interrupt
-IRETS
+IRET
 OS 9 //V2 EX2e
 IRET
