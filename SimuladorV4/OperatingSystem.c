@@ -29,6 +29,7 @@ int OperatingSystem_ExtractFromSleeping();
 int OperatingSystem_CheckQueue();
 int OperatingSystem_GetExecutingProcessID();
 int OperatingSystem_CheckLTS();
+void OperatingSystem_ReleaseMainMemory();
 
 // The process table
 PCB processTable[PROCESSTABLEMAXSIZE];
@@ -113,7 +114,7 @@ void OperatingSystem_Initialize(int daemonsIndex) {
 
 	// Create all user processes from the information given in the command line
 	OperatingSystem_LongTermScheduler();
-	
+
 	if(numberOfNotTerminatedUserProcesses == 0 && OperatingSystem_IsThereANewProgram() == EMPTYQUEUE){ //EX 15
 		// finishing sipID, change PC to address of OS HALT instruction
 		OperatingSystem_TerminatingSIP();
@@ -161,7 +162,6 @@ int OperatingSystem_PrepareStudentsDaemons(int programListDaemonsBase) {
 // Initially, it creates a process from each program specified in the 
 // 			command line and daemons programs
 int OperatingSystem_LongTermScheduler() {
-  
 	int PID, i,
 		numberOfSuccessfullyCreatedProcesses=0;
 	while(OperatingSystem_IsThereANewProgram() == YES){// V3 EX3
@@ -197,7 +197,7 @@ int OperatingSystem_LongTermScheduler() {
 				numberOfNotTerminatedUserProcesses++;
 			// Move process to the ready state
 			OperatingSystem_MoveToTheREADYState(PID);
-			OperatingSystem_PrintStatus();				
+			OperatingSystem_PrintStatus();		
 		}
 	}
 	// Return the number of succesfully created processes
@@ -290,6 +290,8 @@ int OperatingSystem_CreateProcess(int indexOfExecutableProgram) {
 	// PCB initialization
 	OperatingSystem_PCBInitialization(PID, loadingPhysicalAddress, processSize, priority, indexOfExecutableProgram);
 	
+	OperatingSystem_ShowPartitionTable("after allocating memory");
+
 	// Show message "Process [PID] created from program [executableName]\n"
 	OperatingSystem_ShowTime(INIT);
 	ComputerSystem_DebugMessage(70,INIT,PID,executableProgram->executableName);	
@@ -302,6 +304,11 @@ int OperatingSystem_CreateProcess(int indexOfExecutableProgram) {
 // Main memory is assigned in chunks. All chunks are the same size. A process
 // always obtains the chunk whose position in memory is equal to the processor identifier
 int OperatingSystem_ObtainMainMemory(int processSize, int PID) {
+	OperatingSystem_ShowTime(SYSMEM);
+	ComputerSystem_DebugMessage(142,SYSMEM,PID,programList[processTable[PID].programListIndex]->executableName,processSize);
+
+	OperatingSystem_ShowPartitionTable("before allocating memory");
+
 	int i;
 	int minimumActual = 10000000;
 	int minimumNext = 0;
@@ -316,11 +323,10 @@ int OperatingSystem_ObtainMainMemory(int processSize, int PID) {
 		}
 	}
 
-	partitionsTable[iSelect].PID = PID;
-
-	OperatingSystem_ShowTime(SYSMEM);
-	ComputerSystem_DebugMessage(142,SYSMEM,PID,programList[processTable[PID].programListIndex]->executableName,processSize);
-
+	if(i != -1){
+		partitionsTable[iSelect].PID = PID;
+	}
+	
  	if (processSize>MAINMEMORYSECTIONSIZE){
 		return TOOBIGPROCESS;
 	}		
@@ -487,12 +493,17 @@ void OperatingSystem_TerminateProcess() {
   	OperatingSystem_ShowTime(SYSPROC);
 	ComputerSystem_DebugMessage(110,SYSPROC,executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName,
 		statesNames[processTable[executingProcessID].state],statesNames[4]);
+
+	OperatingSystem_ShowPartitionTable("before releasing memory");
+	OperatingSystem_ReleaseMainMemory(); //V4 EX8
+	 OperatingSystem_ShowPartitionTable("after releasing memory");
+
 	processTable[executingProcessID].state=EXIT;
 	
-	if (programList[processTable[executingProcessID].programListIndex]->type==USERPROGRAM)  
+	if (programList[processTable[executingProcessID].programListIndex]->type==USERPROGRAM){
 		// One more user process that has terminated
 		numberOfNotTerminatedUserProcesses--;
-		
+	} 	
 	
 	if (numberOfNotTerminatedUserProcesses==0 && OperatingSystem_IsThereANewProgram() == EMPTYQUEUE) {
 		if (executingProcessID==sipID) {
@@ -510,6 +521,20 @@ void OperatingSystem_TerminateProcess() {
 
 	// Assign the processor to that process
 	OperatingSystem_Dispatch(selectedProcess);
+}
+
+void OperatingSystem_ReleaseMainMemory(){
+	int i;
+	int j = 0;
+	for(i=0 ; i<numOfTotalInitializedPartitions ; i++){
+		if(partitionsTable[i].PID == executingProcessID && j == 0){
+			OperatingSystem_ShowTime(SYSMEM);
+			ComputerSystem_DebugMessage(145,SYSMEM,i,partitionsTable[i].initAddress,partitionsTable[i].size,
+				executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName);
+			partitionsTable[i].PID = NOPROCESS;
+			j++;
+		}
+	}
 }
 
 // System call management routine
