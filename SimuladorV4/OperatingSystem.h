@@ -51,6 +51,7 @@ typedef struct {
 	int copyOfAccumulator;
 	int numberOfClockInterrupts;
 	int whenToWakeUp; // Exercise 5-a of V2
+	int partition;
 } PCB;
 
 // These "extern" declaration enables other source code files to gain access

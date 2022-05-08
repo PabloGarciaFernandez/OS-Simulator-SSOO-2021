@@ -24,4 +24,6 @@ extern heapItem arrivalTimeQueue[];
 
 #define DEFAULT_INTERVAL_BETWEEN_INTERRUPTS 5
 
+#define EXAM 'x'				// Exam messages
+
 #endif

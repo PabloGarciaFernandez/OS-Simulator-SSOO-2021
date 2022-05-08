@@ -19,7 +19,7 @@ void OperatingSystem_TerminateProcess();
 int OperatingSystem_LongTermScheduler();
 void OperatingSystem_PreemptRunningProcess();
 int OperatingSystem_CreateProcess(int);
-int OperatingSystem_ObtainMainMemory(int, int);
+int OperatingSystem_ObtainMainMemory(int, int, int);
 int OperatingSystem_ShortTermScheduler();
 int OperatingSystem_ExtractFromReadyToRun(int);
 void OperatingSystem_HandleException();
@@ -186,12 +186,6 @@ int OperatingSystem_LongTermScheduler() {
 			}			
 		}
 		else{
-			int nextSuitableProccess = OperatingSystem_CheckLTS();
-			if(nextSuitableProccess != NOPROCESS){
-				OperatingSystem_ShowTime(SHORTTERMSCHEDULE);
-				ComputerSystem_DebugMessage(131,SHORTTERMSCHEDULE,PID,programList[i]->executableName,nextSuitableProccess,programList[processTable[nextSuitableProccess].programListIndex]->executableName);
-				PID = nextSuitableProccess;
-			}
 			numberOfSuccessfullyCreatedProcesses++;
 			if (programList[i]->type==USERPROGRAM) 
 				numberOfNotTerminatedUserProcesses++;
@@ -202,25 +196,6 @@ int OperatingSystem_LongTermScheduler() {
 	}
 	// Return the number of succesfully created processes
 	return numberOfSuccessfullyCreatedProcesses;
-}
-
-int OperatingSystem_CheckLTS(){
-	if(processTable[executingProcessID].queueID == USERPROCESSQUEUE){
-		if(numberOfReadyToRunProcesses[USERPROCESSQUEUE] > 0 && processTable[executingProcessID].priority > processTable[Heap_getFirst(readyToRunQueue[USERPROCESSQUEUE],numberOfReadyToRunProcesses[USERPROCESSQUEUE])].priority){
-			return OperatingSystem_ShortTermScheduler();
-		}
-	}
-	else{
-		if(numberOfReadyToRunProcesses[USERPROCESSQUEUE] > 0){
-			return OperatingSystem_ShortTermScheduler();
-		}
-		else{
-			if(numberOfReadyToRunProcesses[DAEMONSQUEUE] > 0 && processTable[executingProcessID].priority > processTable[Heap_getFirst(readyToRunQueue[DAEMONSQUEUE],numberOfReadyToRunProcesses[DAEMONSQUEUE])].priority){
-				return OperatingSystem_ShortTermScheduler();
-			}
-		}
-	}	
-	return NOPROCESS;	
 }
 
 int OperatingSystem_GetExecutingProcessID(){
@@ -261,23 +236,24 @@ int OperatingSystem_CreateProcess(int indexOfExecutableProgram) {
 	}
 	
 	// Obtain enough memory space
-	int selectedPartition = OperatingSystem_ObtainMainMemory(processSize, PID); //V4 EX6 C
- 	loadingPhysicalAddress=partitionsTable[selectedPartition].initAddress; //V4 EX6 C
+	int selectedPartition = OperatingSystem_ObtainMainMemory(processSize, PID, indexOfExecutableProgram); //V4 EX6 C
+ 	
 
-	if(loadingPhysicalAddress < 0){
-		if(loadingPhysicalAddress == TOOBIGPROCESS){
+	if(selectedPartition < 0){
+		if(selectedPartition == TOOBIGPROCESS){
 			return TOOBIGPROCESS; //CHANGE EX6
 		}			
-		if(loadingPhysicalAddress == MEMORYFULL){
+		if(selectedPartition == MEMORYFULL){
 			OperatingSystem_ShowTime(ERROR); //V4 EX6 D
-			ComputerSystem_DebugMessage(144,ERROR,programList[processTable[PID].programListIndex]->executableName);
+			ComputerSystem_DebugMessage(144,ERROR,programList[indexOfExecutableProgram]->executableName);
 			return MEMORYFULL;
 		}
 	}
 	else{
+		loadingPhysicalAddress=partitionsTable[selectedPartition].initAddress; //V4 EX6 C
 		OperatingSystem_ShowTime(SYSMEM); //V4 EX6 C
 		ComputerSystem_DebugMessage(143,SYSMEM,selectedPartition,loadingPhysicalAddress,partitionsTable[selectedPartition].size,
-			PID, programList[processTable[PID].programListIndex]->executableName);	
+			PID, programList[indexOfExecutableProgram]->executableName);	
 	}
 
 	// Load program in the allocated memory
@@ -303,9 +279,9 @@ int OperatingSystem_CreateProcess(int indexOfExecutableProgram) {
 
 // Main memory is assigned in chunks. All chunks are the same size. A process
 // always obtains the chunk whose position in memory is equal to the processor identifier
-int OperatingSystem_ObtainMainMemory(int processSize, int PID) {
+int OperatingSystem_ObtainMainMemory(int processSize, int PID, int indexOfExecutableProgram) {
 	OperatingSystem_ShowTime(SYSMEM);
-	ComputerSystem_DebugMessage(142,SYSMEM,PID,programList[processTable[PID].programListIndex]->executableName,processSize);
+	ComputerSystem_DebugMessage(142,SYSMEM,PID,programList[indexOfExecutableProgram]->executableName,processSize);
 
 	OperatingSystem_ShowPartitionTable("before allocating memory");
 
@@ -313,7 +289,11 @@ int OperatingSystem_ObtainMainMemory(int processSize, int PID) {
 	int minimumActual = 10000000;
 	int minimumNext = 0;
 	int iSelect = -1;
+	int maxSize = 0;
 	for(i = 0; i<numOfTotalInitializedPartitions; i++){
+		if(partitionsTable[i].size >= maxSize){
+			maxSize = partitionsTable[i].size;
+		}
 		if(partitionsTable[i].size >= processSize && partitionsTable[i].PID == NOPROCESS){
 			minimumNext = partitionsTable[i].size;
 			if(minimumActual > minimumNext){
@@ -323,11 +303,12 @@ int OperatingSystem_ObtainMainMemory(int processSize, int PID) {
 		}
 	}
 
-	if(i != -1){
+	if(iSelect != -1){
 		partitionsTable[iSelect].PID = PID;
+		processTable[PID].partition = iSelect;
 	}
 	
- 	if (processSize>MAINMEMORYSECTIONSIZE){
+ 	if (processSize>maxSize){
 		return TOOBIGPROCESS;
 	}		
 
@@ -424,11 +405,12 @@ void OperatingSystem_RestoreContext(int PID) {
 	// New values for the CPU registers are obtained from the PCB
 	Processor_CopyInSystemStack(MAINMEMORYSIZE-1,processTable[PID].copyOfPCRegister);
 	Processor_CopyInSystemStack(MAINMEMORYSIZE-2,processTable[PID].copyOfPSWRegister);
-	Processor_SetAccumulator(processTable[PID].copyOfAccumulator); //EX 13
 	
 	// Same thing for the MMU registers
 	MMU_SetBase(processTable[PID].initialPhysicalAddress);
 	MMU_SetLimit(processTable[PID].processSize);
+
+	Processor_SetAccumulator(processTable[PID].copyOfAccumulator); //EX 13
 }
 
 
@@ -524,17 +506,12 @@ void OperatingSystem_TerminateProcess() {
 }
 
 void OperatingSystem_ReleaseMainMemory(){
-	int i;
-	int j = 0;
-	for(i=0 ; i<numOfTotalInitializedPartitions ; i++){
-		if(partitionsTable[i].PID == executingProcessID && j == 0){
-			OperatingSystem_ShowTime(SYSMEM);
-			ComputerSystem_DebugMessage(145,SYSMEM,i,partitionsTable[i].initAddress,partitionsTable[i].size,
-				executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName);
-			partitionsTable[i].PID = NOPROCESS;
-			j++;
-		}
-	}
+		OperatingSystem_ShowTime(SYSMEM);
+		ComputerSystem_DebugMessage(145,SYSMEM,processTable[executingProcessID].partition,partitionsTable[processTable[executingProcessID].partition].initAddress
+			,partitionsTable[processTable[executingProcessID].partition].size,
+			executingProcessID,programList[processTable[executingProcessID].programListIndex]->executableName);
+
+		partitionsTable[processTable[executingProcessID].partition].PID = NOPROCESS;
 }
 
 // System call management routine
